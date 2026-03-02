@@ -19,6 +19,8 @@ enum SymmetryError {
     Read(String),
     #[error("failed to write BRZ: {0}")]
     Write(String),
+    #[error("this BRZ contains entities ({0}) and cannot be mirrored by this tool")]
+    UnsupportedEntities(usize),
     #[error("no bricks were found in the selected save")]
     EmptySave,
 }
@@ -178,6 +180,10 @@ fn run_symmetry(input: &Path, output: &Path, axis: Axis) -> Result<usize, Symmet
         .map_err(|e| SymmetryError::Read(e.to_string()))?
         .into_reader();
 
+    if let Some(entity_count) = count_entities(&reader)? {
+        return Err(SymmetryError::UnsupportedEntities(entity_count));
+    }
+
     let global_data = reader
         .global_data()
         .map_err(|e| SymmetryError::Read(e.to_string()))?;
@@ -238,6 +244,26 @@ fn run_symmetry(input: &Path, output: &Path, axis: Axis) -> Result<usize, Symmet
         .map_err(|e| SymmetryError::Write(e.to_string()))?;
 
     Ok(count)
+}
+
+fn count_entities(reader: &brdb::BrReader<impl BrFsReader>) -> Result<Option<usize>, SymmetryError> {
+    let Ok(chunks) = reader.entity_chunk_index() else {
+        return Ok(None);
+    };
+
+    let mut count = 0usize;
+    for chunk in chunks {
+        let entities = reader
+            .entity_chunk(chunk)
+            .map_err(|e| SymmetryError::Read(e.to_string()))?;
+        count += entities.len();
+    }
+
+    if count > 0 {
+        Ok(Some(count))
+    } else {
+        Ok(None)
+    }
 }
 
 fn read_grid_bricks(
