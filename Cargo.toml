@@ -1,0 +1,10 @@
+[package]
+name = "brz-symmetry"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+brdb = "0.5"
+eframe = { version = "0.33", features = ["persistence"] }
+rfd = "0.17"
+thiserror = "2.0"
