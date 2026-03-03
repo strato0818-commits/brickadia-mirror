@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use wasm_bindgen::prelude::*;
 
-const SOURCE_PLUGIN_JS: &str = include_str!("../omegga.plugin.js");
+const SOURCE_PLUGIN_JS: &str = include_str!("../../../omegga.plugin.js");
 
 #[derive(Clone, Copy)]
 enum Axis {
