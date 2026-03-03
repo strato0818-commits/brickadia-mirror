@@ -1,6 +1,7 @@
-import init, { validate_brz, process_brz_roundtrip } from "./pkg/brz_symmetry_web.js";
+import init, { validate_brz, process_brz } from "./pkg/brz_symmetry_web.js";
 
 const fileInput = document.getElementById("fileInput");
+const axisSelect = document.getElementById("axisSelect");
 const validateBtn = document.getElementById("validateBtn");
 const processBtn = document.getElementById("processBtn");
 const statusEl = document.getElementById("status");
@@ -54,12 +55,14 @@ validateBtn.addEventListener("click", async () => {
 processBtn.addEventListener("click", async () => {
   if (!currentFile) return;
   try {
-    setStatus("Processing...");
+    const axis = axisSelect.value;
+    setStatus(`Processing axis ${axis.toUpperCase()}...`);
     const bytes = await readFileBytes(currentFile);
-    const out = process_brz_roundtrip(bytes);
+    const out = process_brz(bytes, axis);
     const stem = currentFile.name.replace(/\.brz$/i, "");
-    downloadBytes(`${stem}-processed.brz`, out);
-    setStatus(`Done. Downloaded ${stem}-processed.brz`);
+    const outName = `${stem}-${axis}.brz`;
+    downloadBytes(outName, out);
+    setStatus(`Done. Downloaded ${outName}`);
   } catch (err) {
     setStatus(`Process failed: ${err}`);
   }

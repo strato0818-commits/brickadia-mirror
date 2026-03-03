@@ -29,7 +29,11 @@ pub fn validate_brz(input: &[u8]) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn process_brz_roundtrip(input: &[u8]) -> Result<Vec<u8>, JsValue> {
+pub fn process_brz(input: &[u8], axis: &str) -> Result<Vec<u8>, JsValue> {
+    if !matches!(axis.to_ascii_lowercase().as_str(), "x" | "y" | "z") {
+        return Err(JsValue::from_str("axis must be x, y, or z"));
+    }
+
     let brz = Brz::read_slice(input)
         .map_err(|e| JsValue::from_str(&format!("failed to read BRZ: {e}")))?;
 
