@@ -1,0 +1,14 @@
+D:\Mods\omegga-mirror\symmetry-rust\web\target\wasm32-unknown-unknown\release\deps\serde-58571bbce3159c71.d: C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs D:\Mods\omegga-mirror\symmetry-rust\web\target\wasm32-unknown-unknown\release\build\serde-f5fcbb3a91713d43\out/private.rs
+
+D:\Mods\omegga-mirror\symmetry-rust\web\target\wasm32-unknown-unknown\release\deps\libserde-58571bbce3159c71.rlib: C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs D:\Mods\omegga-mirror\symmetry-rust\web\target\wasm32-unknown-unknown\release\build\serde-f5fcbb3a91713d43\out/private.rs
+
+D:\Mods\omegga-mirror\symmetry-rust\web\target\wasm32-unknown-unknown\release\deps\libserde-58571bbce3159c71.rmeta: C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs D:\Mods\omegga-mirror\symmetry-rust\web\target\wasm32-unknown-unknown\release\build\serde-f5fcbb3a91713d43\out/private.rs
+
+C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+D:\Mods\omegga-mirror\symmetry-rust\web\target\wasm32-unknown-unknown\release\build\serde-f5fcbb3a91713d43\out/private.rs:
+
+# env-dep:OUT_DIR=D:\\Mods\\omegga-mirror\\symmetry-rust\\web\\target\\wasm32-unknown-unknown\\release\\build\\serde-f5fcbb3a91713d43\\out

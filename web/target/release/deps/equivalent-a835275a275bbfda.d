@@ -1,0 +1,7 @@
+D:\Mods\omegga-mirror\symmetry-rust\web\target\release\deps\equivalent-a835275a275bbfda.d: C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\equivalent-1.0.2\src\lib.rs
+
+D:\Mods\omegga-mirror\symmetry-rust\web\target\release\deps\libequivalent-a835275a275bbfda.rlib: C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\equivalent-1.0.2\src\lib.rs
+
+D:\Mods\omegga-mirror\symmetry-rust\web\target\release\deps\libequivalent-a835275a275bbfda.rmeta: C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\equivalent-1.0.2\src\lib.rs
+
+C:\Users\Kevin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\equivalent-1.0.2\src\lib.rs:
