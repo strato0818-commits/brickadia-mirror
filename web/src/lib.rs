@@ -1,4 +1,8 @@
-use brdb::{Brick, BrickSize, BrickType, Brz, Direction, IntoReader, Position, Rotation, World};
+use brdb::schema::{BrdbSchemaGlobalData, BrdbValue, ReadBrdbSchema};
+use brdb::{
+    byte_to_orientation, AsBrdbValue, BitFlags, BrFsReader, Brick, BrickSize, BrickType, Brz,
+    Direction, IntoReader, Position, Rotation, SavedBrickColor, World,
+};
 use wasm_bindgen::prelude::*;
 
 #[derive(Clone, Copy)]
@@ -138,7 +142,7 @@ pub fn process_brz(input: &[u8], axis: &str) -> Result<Vec<u8>, JsValue> {
 
 fn read_main_bricks(
     reader: &brdb::BrReader<impl brdb::BrFsReader>,
-    global_data: std::sync::Arc<brdb::schema::BrdbSchemaGlobalData>,
+    global_data: std::sync::Arc<BrdbSchemaGlobalData>,
 ) -> Result<Vec<Brick>, JsValue> {
     let chunks = reader
         .brick_chunk_index(1)
@@ -146,17 +150,213 @@ fn read_main_bricks(
 
     let mut out = Vec::new();
     for chunk in chunks {
-        let soa = reader
-            .brick_chunk_soa(1, chunk.index)
-            .map_err(|e| JsValue::from_str(&format!("failed to read brick chunk: {e}")))?;
-        for brick in soa.iter_bricks(chunk.index, global_data.clone()) {
-            out.push(
-                brick.map_err(|e| JsValue::from_str(&format!("failed to decode brick: {e}")))?,
-            );
+        match reader.brick_chunk_soa(1, chunk.index) {
+            Ok(soa) => {
+                for brick in soa.iter_bricks(chunk.index, global_data.clone()) {
+                    out.push(
+                        brick.map_err(|e| {
+                            JsValue::from_str(&format!("failed to decode brick: {e}"))
+                        })?,
+                    );
+                }
+            }
+            Err(_) => {
+                let mut compat = read_grid_chunk_bricks_compat(reader, &global_data, 1, chunk.index)?;
+                out.append(&mut compat);
+            }
         }
     }
 
     Ok(out)
+}
+
+fn read_grid_chunk_bricks_compat(
+    reader: &brdb::BrReader<impl BrFsReader>,
+    global_data: &std::sync::Arc<BrdbSchemaGlobalData>,
+    grid_id: usize,
+    chunk: brdb::ChunkIndex,
+) -> Result<Vec<Brick>, JsValue> {
+    let path = format!("World/0/Bricks/Grids/{grid_id}/Chunks/{chunk}.mps");
+    let found = reader
+        .find_file_by_path(&path)
+        .map_err(|e| JsValue::from_str(&format!("failed to find legacy chunk path: {e}")))?
+        .ok_or_else(|| JsValue::from_str(&format!("missing file: {path}")))?;
+
+    let schema = reader
+        .bricks_schema_rev(found.created_at)
+        .map_err(|e| JsValue::from_str(&format!("failed to load brick schema: {e}")))?;
+    let data = reader
+        .find_blob(found.blob_id)
+        .map_err(|e| JsValue::from_str(&format!("failed to find chunk blob: {e}")))?
+        .read()
+        .map_err(|e| JsValue::from_str(&format!("failed to read chunk blob: {e}")))?;
+
+    let mps = data
+        .as_slice()
+        .read_brdb(&schema, "BRSavedBrickChunkSoA")
+        .map_err(|e| JsValue::from_str(&format!("failed to decode legacy chunk: {e}")))?;
+
+    decode_legacy_chunk(&mps, chunk, global_data)
+}
+
+fn decode_legacy_chunk(
+    mps: &BrdbValue,
+    chunk: brdb::ChunkIndex,
+    global_data: &std::sync::Arc<BrdbSchemaGlobalData>,
+) -> Result<Vec<Brick>, JsValue> {
+    let procedural_brick_starting_index = mps
+        .prop("ProceduralBrickStartingIndex")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing ProceduralBrickStartingIndex: {e}")))?
+        .as_brdb_u32()
+        .map_err(|e| JsValue::from_str(&format!("invalid ProceduralBrickStartingIndex: {e}")))?
+        as usize;
+    let brick_size_counters: Vec<brdb::BrickSizeCounter> = mps
+        .prop("BrickSizeCounters")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing BrickSizeCounters: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid BrickSizeCounters: {e}")))?;
+    let brick_sizes: Vec<BrickSize> = mps
+        .prop("BrickSizes")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing BrickSizes: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid BrickSizes: {e}")))?;
+    let brick_type_indices: Vec<u32> = mps
+        .prop("BrickTypeIndices")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing BrickTypeIndices: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid BrickTypeIndices: {e}")))?;
+    let owner_indices: Vec<u32> = mps
+        .prop("OwnerIndices")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing OwnerIndices: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid OwnerIndices: {e}")))?;
+    let relative_positions: Vec<brdb::RelativePosition> = mps
+        .prop("RelativePositions")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing RelativePositions: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid RelativePositions: {e}")))?;
+    let orientations: Vec<u8> = mps
+        .prop("Orientations")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing Orientations: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid Orientations: {e}")))?;
+    let material_indices: Vec<u8> = mps
+        .prop("MaterialIndices")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing MaterialIndices: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid MaterialIndices: {e}")))?;
+    let colors_and_alphas: Vec<SavedBrickColor> = mps
+        .prop("ColorsAndAlphas")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing ColorsAndAlphas: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid ColorsAndAlphas: {e}")))?;
+
+    let collision_flags_player: BitFlags = mps
+        .prop("CollisionFlags_Player")
+        .map_err(|e| JsValue::from_str(&format!("legacy chunk missing CollisionFlags_Player: {e}")))?
+        .try_into()
+        .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid CollisionFlags_Player: {e}")))?;
+    let collision_flags_player1 =
+        parse_optional_flags(mps, "CollisionFlags_Player1", &collision_flags_player)?;
+    let collision_flags_player2 =
+        parse_optional_flags(mps, "CollisionFlags_Player2", &collision_flags_player)?;
+    let collision_flags_player3 =
+        parse_optional_flags(mps, "CollisionFlags_Player3", &collision_flags_player)?;
+    let collision_flags_weapon =
+        parse_optional_flags(mps, "CollisionFlags_Weapon", &collision_flags_player)?;
+    let collision_flags_interaction =
+        parse_optional_flags(mps, "CollisionFlags_Interaction", &collision_flags_weapon)?;
+    let collision_flags_tool =
+        parse_optional_flags(mps, "CollisionFlags_Tool", &collision_flags_interaction)?;
+    let collision_flags_physics =
+        parse_optional_flags(mps, "CollisionFlags_Physics", &collision_flags_player)?;
+    let visibility_flags = parse_optional_flags(
+        mps,
+        "VisibilityFlags",
+        &BitFlags::new_full(brick_type_indices.len()),
+    )?;
+
+    let proc_brick_sizes = brick_sizes
+        .iter()
+        .copied()
+        .zip(
+            brick_size_counters
+                .iter()
+                .flat_map(|c| (0..c.num_sizes).map(|_| c.asset_index)),
+        )
+        .collect::<Vec<_>>();
+
+    let mut out = Vec::with_capacity(brick_type_indices.len());
+    for i in 0..brick_type_indices.len() {
+        let ty_index = brick_type_indices[i] as usize;
+        let asset = if ty_index < procedural_brick_starting_index {
+            BrickType::Basic(
+                global_data
+                    .basic_brick_asset_by_index(ty_index)
+                    .map_err(|e| JsValue::from_str(&format!("invalid basic asset index: {e}")))?,
+            )
+        } else {
+            let size_index = ty_index.saturating_sub(procedural_brick_starting_index);
+            let (size, asset_index) = proc_brick_sizes
+                .get(size_index)
+                .ok_or_else(|| JsValue::from_str(&format!("invalid procedural size index {size_index}")))?;
+            BrickType::Procedural {
+                asset: global_data
+                    .procedural_brick_asset_by_index(*asset_index as usize)
+                    .map_err(|e| JsValue::from_str(&format!("invalid procedural asset index: {e}")))?,
+                size: *size,
+            }
+        };
+
+        let position = Position::from_relative(chunk, relative_positions[i]);
+        let (direction, rotation) = byte_to_orientation(orientations[i]);
+        let color = colors_and_alphas[i];
+
+        out.push(Brick {
+            id: None,
+            asset,
+            owner_index: Some(owner_indices[i] as usize),
+            position,
+            rotation,
+            direction,
+            collision: brdb::Collision {
+                player: collision_flags_player.get(i),
+                player1: Some(collision_flags_player1.get(i)),
+                player2: Some(collision_flags_player2.get(i)),
+                player3: Some(collision_flags_player3.get(i)),
+                weapon: collision_flags_weapon.get(i),
+                interact: collision_flags_interaction.get(i),
+                tool: collision_flags_tool.get(i),
+                physics: collision_flags_physics.get(i),
+            },
+            visible: visibility_flags.get(i),
+            color: color.color(),
+            material: global_data
+                .material_asset_by_index(material_indices[i] as usize)
+                .map_err(|e| JsValue::from_str(&format!("invalid material index: {e}")))?,
+            material_intensity: color.a,
+            components: Vec::new(),
+        });
+    }
+
+    Ok(out)
+}
+
+fn parse_optional_flags(
+    mps: &BrdbValue,
+    field: &str,
+    fallback: &BitFlags,
+) -> Result<BitFlags, JsValue> {
+    if mps.contains_key(field) {
+        let flags: BitFlags = mps
+            .prop(field)
+            .map_err(|e| JsValue::from_str(&format!("failed to read {field}: {e}")))?
+            .try_into()
+            .map_err(|e: brdb::BrdbSchemaError| JsValue::from_str(&format!("invalid {field}: {e}")))?;
+        Ok(flags)
+    } else {
+        Ok(fallback.clone())
+    }
 }
 
 fn compute_bounds(bricks: &[Brick]) -> Option<Bounds> {
