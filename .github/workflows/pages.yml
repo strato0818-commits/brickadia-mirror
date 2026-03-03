@@ -5,6 +5,7 @@ on:
     branches: ["master"]
     paths:
       - "docs/**"
+      - "web/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -29,6 +30,17 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Build wasm package
+        run: wasm-pack build ./web --target web --release --out-dir ../docs/pkg
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
