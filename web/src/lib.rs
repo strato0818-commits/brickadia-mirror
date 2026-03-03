@@ -3,7 +3,11 @@ use brdb::{
     byte_to_orientation, AsBrdbValue, BitFlags, BrFsReader, Brick, BrickSize, BrickType, Brz,
     Direction, IntoReader, Position, Rotation, SavedBrickColor, World,
 };
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use wasm_bindgen::prelude::*;
+
+const SOURCE_PLUGIN_JS: &str = include_str!("../omegga.plugin.js");
 
 #[derive(Clone, Copy)]
 enum Axis {
@@ -399,8 +403,14 @@ fn mirror_brick(brick: &mut Brick, bounds: Bounds, axis: [bool; 3]) {
     }
     brick.position = pos;
 
-    let (new_direction, new_rotation, swap_xy) =
-        convert_direction(brick.direction, brick.rotation, axis, 1);
+    let original_asset = brick.asset.asset().as_ref().to_string();
+    let mirrored_asset = mirror_asset_name(&original_asset).to_string();
+    let (new_direction, new_rotation, swap_xy) = convert_direction(
+        brick.direction,
+        brick.rotation,
+        axis,
+        rotation_type(&mirrored_asset),
+    );
     brick.direction = new_direction;
     brick.rotation = new_rotation;
 
@@ -412,6 +422,11 @@ fn mirror_brick(brick: &mut Brick, bounds: Bounds, axis: [bool; 3]) {
                 z: size.z,
             };
         }
+    }
+
+    match &mut brick.asset {
+        BrickType::Basic(asset) => *asset = mirrored_asset.into(),
+        BrickType::Procedural { asset, .. } => *asset = mirrored_asset.into(),
     }
 }
 
@@ -617,5 +632,94 @@ fn index_to_rotation(index: usize) -> Rotation {
         1 => Rotation::Deg90,
         2 => Rotation::Deg180,
         _ => Rotation::Deg270,
+    }
+}
+
+fn parse_rotation_types() -> HashMap<String, u8> {
+    let mut map = HashMap::new();
+    let mut in_block = false;
+
+    for line in SOURCE_PLUGIN_JS.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("const rotationTypes = {") {
+            in_block = true;
+            continue;
+        }
+        if in_block && trimmed == "};" {
+            break;
+        }
+        if !in_block || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let Some((k, v)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = k.trim().trim_matches('"').trim_matches('\'');
+        let value = v
+            .trim()
+            .trim_end_matches(',')
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+
+        if let Ok(parsed) = value.parse::<u8>() {
+            map.insert(key.to_string(), parsed);
+        }
+    }
+
+    map
+}
+
+fn parse_mirror_map() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let mut in_block = false;
+
+    for line in SOURCE_PLUGIN_JS.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("const mirrorMap = {") {
+            in_block = true;
+            continue;
+        }
+        if in_block && trimmed == "}" {
+            break;
+        }
+        if !in_block || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let Some((k, v)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = k.trim().trim_matches('"').trim_matches('\'');
+        let value = v
+            .trim()
+            .trim_end_matches(',')
+            .trim_matches('"')
+            .trim_matches('\'');
+
+        if !key.is_empty() && !value.is_empty() {
+            map.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    map
+}
+
+fn rotation_type(asset_name: &str) -> u8 {
+    static ROTATION_TYPES: OnceLock<HashMap<String, u8>> = OnceLock::new();
+    ROTATION_TYPES
+        .get_or_init(parse_rotation_types)
+        .get(asset_name)
+        .copied()
+        .unwrap_or(1)
+}
+
+fn mirror_asset_name(asset_name: &str) -> &str {
+    static MIRROR_MAP: OnceLock<HashMap<String, String>> = OnceLock::new();
+    if let Some(mapped) = MIRROR_MAP.get_or_init(parse_mirror_map).get(asset_name) {
+        mapped.as_str()
+    } else {
+        asset_name
     }
 }
