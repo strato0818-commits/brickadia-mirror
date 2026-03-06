@@ -82,20 +82,33 @@ function extractClipboardFile(clipboardData) {
 
 async function copyOutputToClipboard() {
   if (!currentOutput) return;
-  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+  if (typeof ClipboardItem === "undefined") {
     setStatus("Clipboard write is not supported in this browser.");
     return;
   }
 
   try {
     const blob = new Blob([currentOutput.bytes], { type: "application/octet-stream" });
-    const item = new ClipboardItem({
-      "application/octet-stream": blob,
-      "application/x-brz": blob,
-      "text/plain": new Blob([currentOutput.name], { type: "text/plain" }),
-    });
-    await navigator.clipboard.write([item]);
-    setStatus(`Copied ${currentOutput.name} to clipboard.`);
+    const supports = typeof ClipboardItem.supports === "function" ? ClipboardItem.supports.bind(ClipboardItem) : null;
+    const supportedBinaryType = ["application/x-brz", "application/octet-stream", "web application/octet-stream"]
+      .find((type) => (supports ? supports(type) : false));
+
+    if (supportedBinaryType && navigator.clipboard?.write) {
+      const item = new ClipboardItem({ [supportedBinaryType]: blob });
+      await navigator.clipboard.write([item]);
+      setStatus(`Copied ${currentOutput.name} to clipboard.`);
+      return;
+    }
+
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(currentOutput.name);
+      setStatus(
+        "This browser cannot write BRZ binary data to clipboard. Output filename copied instead."
+      );
+      return;
+    }
+
+    setStatus("Clipboard write is not supported in this browser.");
   } catch (err) {
     setStatus(`Copy failed: ${err}`);
   }
