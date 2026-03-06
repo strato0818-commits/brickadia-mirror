@@ -10,6 +10,7 @@
     <main class="app">
       <h1>BRZ Symmetry Web</h1>
       <p class="sub">Prototype: client-side upload/process/download on GitHub Pages.</p>
+      <p class="hint">Paste with Ctrl+V after copying a build in Brickadia.</p>
 
       <label class="field">
         <span>Input .brz</span>
@@ -28,9 +29,10 @@
       <div class="actions">
         <button id="validateBtn" disabled>Validate</button>
         <button id="processBtn" disabled>Process + Download</button>
+        <button id="copyOutputBtn" disabled>Copy Output</button>
       </div>
 
-      <pre id="status" class="status">Select a BRZ file.</pre>
+      <pre id="status" class="status">Paste with Ctrl+V, or select a BRZ file.</pre>
     </main>
 
     <script type="module" src="./app.js"></script>
