@@ -553,6 +553,7 @@ name = "brz-symmetry"
 version = "0.1.0"
 dependencies = [
  "brdb",
+ "clipboard-win",
  "eframe",
  "rfd",
  "thiserror 2.0.18",

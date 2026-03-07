@@ -8,3 +8,6 @@ brdb = "0.5"
 eframe = { version = "0.33", features = ["persistence"] }
 rfd = "0.17"
 thiserror = "2.0"
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5.4.1"

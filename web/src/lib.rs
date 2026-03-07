@@ -95,7 +95,7 @@ pub fn validate_brz(input: &[u8]) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn process_brz(input: &[u8], axis: &str) -> Result<Vec<u8>, JsValue> {
+pub fn process_brz(input: &[u8], axis: &str, z_offset: i32) -> Result<Vec<u8>, JsValue> {
     let axis = Axis::parse(axis).ok_or_else(|| JsValue::from_str("axis must be x, y, or z"))?;
 
     let brz = Brz::read_slice(input)
@@ -132,7 +132,12 @@ pub fn process_brz(input: &[u8], axis: &str) -> Result<Vec<u8>, JsValue> {
         mirror_brick(brick, bounds, axis_flags);
     }
 
-    recenter_and_lift(&mut bricks)?;
+    let post_bounds = compute_bounds(&bricks)
+        .ok_or_else(|| JsValue::from_str("no bricks were found in the selected save"))?;
+    recenter_to_zero(&mut bricks, post_bounds);
+    let recentered_bounds = compute_bounds(&bricks)
+        .ok_or_else(|| JsValue::from_str("no bricks were found in the selected save"))?;
+    lift_to_bottom_z_zero(&mut bricks, recentered_bounds, z_offset);
 
     let mut world = World::new();
     world.add_bricks(bricks);
@@ -373,21 +378,30 @@ fn compute_bounds(bricks: &[Brick]) -> Option<Bounds> {
     if found { Some(bounds) } else { None }
 }
 
-fn recenter_and_lift(bricks: &mut [Brick]) -> Result<(), JsValue> {
-    let bounds =
-        compute_bounds(bricks).ok_or_else(|| JsValue::from_str("no bricks were found in save"))?;
+fn recenter_to_zero(bricks: &mut [Brick], bounds: Bounds) {
     let center_x = ((bounds.min_x + bounds.max_x) as f64 / 2.0).round() as i32;
     let center_y = ((bounds.min_y + bounds.max_y) as f64 / 2.0).round() as i32;
+    let center_z = ((bounds.min_z + bounds.max_z) as f64 / 2.0).round() as i32;
     let shift_x = -center_x;
     let shift_y = -center_y;
-    let shift_z = -bounds.min_z;
+    let shift_z = -center_z;
 
     for brick in bricks {
         brick.position.x += shift_x;
         brick.position.y += shift_y;
         brick.position.z += shift_z;
     }
-    Ok(())
+}
+
+fn lift_to_bottom_z_zero(bricks: &mut [Brick], bounds: Bounds, z_offset: i32) {
+    let shift_z = -bounds.min_z + z_offset;
+    if shift_z == 0 {
+        return;
+    }
+
+    for brick in bricks {
+        brick.position.z += shift_z;
+    }
 }
 
 fn mirror_brick(brick: &mut Brick, bounds: Bounds, axis: [bool; 3]) {

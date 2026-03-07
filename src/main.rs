@@ -5,8 +5,10 @@ use brdb::{
 use eframe::{egui, run_native, App, NativeOptions};
 use rfd::{FileDialog, MessageDialog, MessageLevel};
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use brdb::schema::{BrdbSchemaGlobalData, BrdbValue, ReadBrdbSchema};
 use brdb::AsBrdbValue;
@@ -93,7 +95,66 @@ struct SymmetryApp {
     input_path: String,
     output_path: String,
     axis: Option<Axis>,
+    z_offset: i32,
     status: String,
+}
+
+impl SymmetryApp {
+    fn paste_from_clipboard(&mut self) {
+        match read_brz_from_clipboard() {
+            Ok((bytes, name_hint)) => match write_clipboard_input_temp(&bytes, &name_hint) {
+                Ok(path) => {
+                    self.input_path = path.to_string_lossy().to_string();
+                    self.status = format!(
+                        "Pasted {} bytes from clipboard into {}",
+                        bytes.len(),
+                        self.input_path
+                    );
+                }
+                Err(err) => {
+                    self.status = format!("Error: {err}");
+                }
+            },
+            Err(err) => {
+                self.status = format!("Error: {err}");
+            }
+        }
+    }
+
+    fn run_current_symmetry(&mut self) {
+        let result = run_symmetry(
+            Path::new(self.input_path.trim()),
+            Path::new(self.output_path.trim()),
+            self.axis.expect("axis checked"),
+            self.z_offset,
+        );
+
+        match result {
+            Ok(count) => {
+                self.status = format!(
+                    "Done: mirrored {} bricks on {} axis",
+                    count,
+                    self.axis.expect("axis checked").label()
+                );
+                match copy_output_to_clipboard(Path::new(self.output_path.trim())) {
+                    Ok(copy_msg) => {
+                        self.status = format!("{}; {}", self.status, copy_msg);
+                    }
+                    Err(err) => {
+                        self.status = format!("{}; clipboard copy failed: {}", self.status, err);
+                    }
+                }
+            }
+            Err(e) => {
+                self.status = format!("Error: {e}");
+                let _ = MessageDialog::new()
+                    .set_level(MessageLevel::Error)
+                    .set_title("Symmetry failed")
+                    .set_description(&self.status)
+                    .show();
+            }
+        }
+    }
 }
 
 impl App for SymmetryApp {
@@ -133,39 +194,27 @@ impl App for SymmetryApp {
                     ui.radio_value(&mut self.axis, Some(axis), axis.label());
                 }
             });
+            ui.horizontal(|ui| {
+                ui.label("Z Offset");
+                ui.add(egui::DragValue::new(&mut self.z_offset).speed(1));
+            });
 
             let can_run = !self.input_path.trim().is_empty()
                 && !self.output_path.trim().is_empty()
                 && self.axis.is_some();
 
             if ui
-                .add_enabled(can_run, egui::Button::new("Apply Symmetry"))
+                .add_enabled(can_run, egui::Button::new("Apply Symmetry + Copy to Clipboard"))
                 .clicked()
             {
-                let result = run_symmetry(
-                    Path::new(self.input_path.trim()),
-                    Path::new(self.output_path.trim()),
-                    self.axis.expect("axis checked"),
-                );
-
-                match result {
-                    Ok(count) => {
-                        self.status = format!(
-                            "Done: mirrored {} bricks on {} axis",
-                            count,
-                            self.axis.expect("axis checked").label()
-                        );
-                    }
-                    Err(e) => {
-                        self.status = format!("Error: {e}");
-                        let _ = MessageDialog::new()
-                            .set_level(MessageLevel::Error)
-                            .set_title("Symmetry failed")
-                            .set_description(&self.status)
-                            .show();
-                    }
-                }
+                self.run_current_symmetry();
             }
+
+            ui.horizontal(|ui| {
+                if ui.button("Paste BRZ from Clipboard").clicked() {
+                    self.paste_from_clipboard();
+                }
+            });
 
             if !self.status.is_empty() {
                 ui.separator();
@@ -175,7 +224,12 @@ impl App for SymmetryApp {
     }
 }
 
-fn run_symmetry(input: &Path, output: &Path, axis: Axis) -> Result<usize, SymmetryError> {
+fn run_symmetry(
+    input: &Path,
+    output: &Path,
+    axis: Axis,
+    z_offset: i32,
+) -> Result<usize, SymmetryError> {
     let reader = Brz::open(input)
         .map_err(|e| SymmetryError::Read(e.to_string()))?
         .into_reader();
@@ -230,7 +284,12 @@ fn run_symmetry(input: &Path, output: &Path, axis: Axis) -> Result<usize, Symmet
         }
     }
 
-    recenter_and_lift(&mut main_bricks, &mut grids)?;
+    let post_bounds =
+        compute_world_bounds(&main_bricks, &grids).ok_or(SymmetryError::EmptySave)?;
+    recenter_to_zero(&mut main_bricks, &mut grids, post_bounds);
+    let recentered_bounds =
+        compute_world_bounds(&main_bricks, &grids).ok_or(SymmetryError::EmptySave)?;
+    lift_to_bottom_z_zero(&mut main_bricks, &mut grids, recentered_bounds, z_offset);
 
     let count = main_bricks.len() + grids.iter().map(|g| g.bricks.len()).sum::<usize>();
 
@@ -294,14 +353,13 @@ fn read_grid_bricks(
     Ok(out)
 }
 
-fn recenter_and_lift(main: &mut [Brick], grids: &mut [LoadedGrid]) -> Result<(), SymmetryError> {
-    let bounds = compute_world_bounds(main, grids).ok_or(SymmetryError::EmptySave)?;
-
+fn recenter_to_zero(main: &mut [Brick], grids: &mut [LoadedGrid], bounds: Bounds) {
     let center_x = ((bounds.min_x + bounds.max_x) as f64 / 2.0).round() as i32;
     let center_y = ((bounds.min_y + bounds.max_y) as f64 / 2.0).round() as i32;
+    let center_z = ((bounds.min_z + bounds.max_z) as f64 / 2.0).round() as i32;
     let shift_x = -center_x;
     let shift_y = -center_y;
-    let shift_z = -bounds.min_z;
+    let shift_z = -center_z;
 
     for brick in main {
         brick.position.x += shift_x;
@@ -314,8 +372,26 @@ fn recenter_and_lift(main: &mut [Brick], grids: &mut [LoadedGrid]) -> Result<(),
         grid.entity.location.y += shift_y as f32;
         grid.entity.location.z += shift_z as f32;
     }
+}
 
-    Ok(())
+fn lift_to_bottom_z_zero(
+    main: &mut [Brick],
+    grids: &mut [LoadedGrid],
+    bounds: Bounds,
+    z_offset: i32,
+) {
+    let shift_z = -bounds.min_z + z_offset;
+    if shift_z == 0 {
+        return;
+    }
+
+    for brick in main {
+        brick.position.z += shift_z;
+    }
+
+    for grid in grids {
+        grid.entity.location.z += shift_z as f32;
+    }
 }
 
 fn read_grid_chunk_bricks_compat(
@@ -883,6 +959,162 @@ fn mirror_asset_name(asset_name: &str) -> &str {
     }
 }
 
+fn sanitize_brz_name(name_hint: &str) -> String {
+    let mut out = String::with_capacity(name_hint.len().max(12));
+    for ch in name_hint.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+
+    if out.is_empty() {
+        out = "clipboard.brz".to_string();
+    }
+
+    if !out.to_ascii_lowercase().ends_with(".brz") {
+        out.push_str(".brz");
+    }
+
+    out
+}
+
+fn clipboard_temp_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("brz-symmetry-clipboard");
+    fs::create_dir_all(&dir).map_err(|e| format!("failed to create temp directory: {e}"))?;
+    Ok(dir)
+}
+
+fn write_clipboard_input_temp(bytes: &[u8], name_hint: &str) -> Result<PathBuf, String> {
+    let mut path = clipboard_temp_dir()?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("system time error: {e}"))?
+        .as_millis();
+    path.push(format!("input-{}-{}", stamp, sanitize_brz_name(name_hint)));
+    fs::write(&path, bytes).map_err(|e| format!("failed to write clipboard input file: {e}"))?;
+    Ok(path)
+}
+
+fn copy_output_to_clipboard(output: &Path) -> Result<String, String> {
+    let bytes = fs::read(output).map_err(|e| format!("failed to read output file: {e}"))?;
+    let name = output
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("output.brz");
+    write_brz_to_clipboard(name, &bytes)?;
+    Ok(format!(
+        "Copied {} ({} bytes) to clipboard",
+        output.display(),
+        bytes.len()
+    ))
+}
+
+#[cfg(windows)]
+fn read_brz_from_clipboard() -> Result<(Vec<u8>, String), String> {
+    use clipboard_win::{formats, get_clipboard, register_format};
+
+    let custom_formats = [
+        "application/x-brz",
+        "application/octet-stream",
+        "BRZ",
+        "BrickadiaBRZ",
+    ];
+
+    for name in custom_formats {
+        if let Some(code) = register_format(name) {
+            if let Ok(bytes) = get_clipboard(formats::RawData(code.get())) {
+                if !bytes.is_empty() {
+                    return Ok((bytes, format!("clipboard-raw-{}.brz", name.replace('/', "-"))));
+                }
+            }
+        }
+    }
+
+    if let Ok(paths) = get_clipboard::<Vec<PathBuf>, _>(formats::FileList) {
+        for path in paths {
+            let is_brz = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("brz"))
+                .unwrap_or(false);
+            if !is_brz {
+                continue;
+            }
+
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("failed to read clipboard file {}: {e}", path.display()))?;
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("clipboard.brz")
+                .to_string();
+            return Ok((bytes, name));
+        }
+    }
+
+    if let Ok(text) = get_clipboard::<String, _>(formats::Unicode) {
+        let maybe_path = PathBuf::from(text.trim().trim_matches('"'));
+        let is_brz = maybe_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("brz"))
+            .unwrap_or(false);
+        if is_brz && maybe_path.is_file() {
+            let bytes = fs::read(&maybe_path).map_err(|e| {
+                format!(
+                    "failed to read clipboard path {}: {e}",
+                    maybe_path.display()
+                )
+            })?;
+            let name = maybe_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("clipboard.brz")
+                .to_string();
+            return Ok((bytes, name));
+        }
+    }
+
+    Err("no BRZ bytes or BRZ file path found on clipboard".to_string())
+}
+
+#[cfg(not(windows))]
+fn read_brz_from_clipboard() -> Result<(Vec<u8>, String), String> {
+    Err("clipboard BRZ integration is only implemented on Windows".to_string())
+}
+
+#[cfg(windows)]
+fn write_brz_to_clipboard(name_hint: &str, bytes: &[u8]) -> Result<(), String> {
+    use clipboard_win::{register_format, Clipboard};
+    use clipboard_win::raw;
+
+    let mut temp_path = clipboard_temp_dir()?;
+    temp_path.push(format!("copied-{}", sanitize_brz_name(name_hint)));
+    fs::write(&temp_path, bytes).map_err(|e| format!("failed to write temp clipboard output: {e}"))?;
+    let temp_path_str = temp_path.to_string_lossy().into_owned();
+
+    let _clip = Clipboard::new_attempts(10).map_err(|e| format!("clipboard open failed: {e}"))?;
+    raw::empty().map_err(|e| format!("clipboard clear failed: {e}"))?;
+
+    raw::set_file_list(&[temp_path_str.as_str()])
+        .map_err(|e| format!("failed to write clipboard file list: {e}"))?;
+
+    for name in ["application/x-brz", "application/octet-stream", "BRZ"] {
+        if let Some(code) = register_format(name) {
+            let _ = raw::set_without_clear(code.get(), bytes);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn write_brz_to_clipboard(_name_hint: &str, _bytes: &[u8]) -> Result<(), String> {
+    Err("clipboard BRZ integration is only implemented on Windows".to_string())
+}
+
 fn main() {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([700.0, 220.0]),
@@ -897,6 +1129,7 @@ fn main() {
                 input_path: String::new(),
                 output_path: default_output_path(),
                 axis: Some(Axis::X),
+                z_offset: 6,
                 status: String::new(),
             }))
         }),

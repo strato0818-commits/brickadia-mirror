@@ -2,6 +2,8 @@ import init, { validate_brz, process_brz } from "./pkg/brz_symmetry_web.js";
 
 const fileInput = document.getElementById("fileInput");
 const axisSelect = document.getElementById("axisSelect");
+const offsetInput = document.getElementById("offsetInput");
+const autoActionToggle = document.getElementById("autoActionToggle");
 const validateBtn = document.getElementById("validateBtn");
 const processBtn = document.getElementById("processBtn");
 const copyOutputBtn = document.getElementById("copyOutputBtn");
@@ -32,6 +34,19 @@ function setInputFile(file, source) {
   clearOutput();
   setButtons();
   setStatus(`${source}: ${file.name}`);
+}
+
+async function tryParseCurrentFile(contextLabel) {
+  if (!wasmReady || !currentFile) return;
+
+  try {
+    setStatus(`${contextLabel}: parsing...`);
+    const bytes = await readFileBytes(currentFile);
+    const result = validate_brz(bytes);
+    setStatus(`${contextLabel}: ${result}`);
+  } catch (err) {
+    setStatus(`${contextLabel}: parse failed: ${err}`);
+  }
 }
 
 async function readFileBytes(file) {
@@ -114,6 +129,36 @@ async function copyOutputToClipboard() {
   }
 }
 
+async function processCurrentFile(contextLabel, isAutoAction = false) {
+  if (!currentFile) return;
+
+  try {
+    const axis = axisSelect.value;
+    const zOffsetRaw = Number.parseInt(offsetInput?.value ?? "6", 10);
+    const zOffset = Number.isFinite(zOffsetRaw) ? zOffsetRaw : 6;
+    setStatus(`${contextLabel}: processing axis ${axis.toUpperCase()} (z offset ${zOffset})...`);
+    const bytes = await readFileBytes(currentFile);
+    const out = process_brz(bytes, axis, zOffset);
+    const stem = currentFile.name.replace(/\.brz$/i, "");
+    const outName = `${stem}-${axis}.brz`;
+
+    currentOutput = {
+      name: outName,
+      bytes: new Uint8Array(out),
+    };
+
+    downloadBytes(outName, out);
+    setButtons();
+    if (isAutoAction) {
+      setStatus(`Done. Auto-downloaded ${outName}.`);
+    } else {
+      setStatus(`Done. Downloaded ${outName}. Use Copy Output to place it in clipboard.`);
+    }
+  } catch (err) {
+    setStatus(`Process failed: ${err}`);
+  }
+}
+
 fileInput.addEventListener("change", () => {
   const selected = fileInput.files?.[0] ?? null;
   if (!selected) {
@@ -141,41 +186,20 @@ window.addEventListener("paste", (event) => {
 
   fileInput.value = "";
   setInputFile(brzFile, "Pasted");
+  if (autoActionToggle?.checked) {
+    void processCurrentFile("Auto action", true);
+  } else {
+    void tryParseCurrentFile("Pasted file");
+  }
 });
 
 validateBtn.addEventListener("click", async () => {
   if (!currentFile) return;
-  try {
-    setStatus("Validating...");
-    const bytes = await readFileBytes(currentFile);
-    const result = validate_brz(bytes);
-    setStatus(result);
-  } catch (err) {
-    setStatus(`Validation failed: ${err}`);
-  }
+  await tryParseCurrentFile("Validation");
 });
 
 processBtn.addEventListener("click", async () => {
-  if (!currentFile) return;
-  try {
-    const axis = axisSelect.value;
-    setStatus(`Processing axis ${axis.toUpperCase()}...`);
-    const bytes = await readFileBytes(currentFile);
-    const out = process_brz(bytes, axis);
-    const stem = currentFile.name.replace(/\.brz$/i, "");
-    const outName = `${stem}-${axis}.brz`;
-
-    currentOutput = {
-      name: outName,
-      bytes: new Uint8Array(out),
-    };
-
-    downloadBytes(outName, out);
-    setButtons();
-    setStatus(`Done. Downloaded ${outName}. Use Copy Output to place it in clipboard.`);
-  } catch (err) {
-    setStatus(`Process failed: ${err}`);
-  }
+  await processCurrentFile("Process");
 });
 
 copyOutputBtn.addEventListener("click", copyOutputToClipboard);
